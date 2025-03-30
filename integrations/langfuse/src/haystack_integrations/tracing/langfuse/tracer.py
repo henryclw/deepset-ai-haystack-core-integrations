@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import os
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
@@ -90,11 +91,15 @@ class LangfuseSpan(Span):
         if not proxy_tracer.is_content_tracing_enabled:
             return
         if key.endswith(".input"):
-            if "messages" in value:
-                messages = [m.to_openai_dict_format() for m in value["messages"]]
-                self._span.update(input=messages)
-            else:
-                self._span.update(input=value)
+            update_value = copy.deepcopy(value)
+            if "messages" in update_value:
+                messages = update_value["messages"]
+                if all(isinstance(m, list) for m in messages):
+                    messages = [m for inner_list in messages for m in inner_list]
+                if all(isinstance(m, ChatMessage) for m in messages):
+                    messages = [m.to_openai_dict_format() for m in messages]
+                update_value["messages"] = messages
+            self._span.update(input=update_value)
         elif key.endswith(".output"):
             if "replies" in value:
                 if all(isinstance(r, ChatMessage) for r in value["replies"]):
@@ -104,7 +109,6 @@ class LangfuseSpan(Span):
                 self._span.update(output=replies)
             else:
                 self._span.update(output=value)
-
         self._data[key] = value
 
     def raw_span(self) -> LangfuseStatefulClient:
